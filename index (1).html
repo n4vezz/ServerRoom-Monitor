@@ -1,0 +1,1595 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ServerRoom Monitor — NOC IoT Dashboard</title>
+  
+  <!-- Google Fonts: Inter & JetBrains Mono untuk angka telemetri presisi -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN untuk utilitas tata letak dan tema responsif -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- MQTT.js v5.10.4 via jsDelivr -->
+  <script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.4/dist/mqtt.min.js"></script>
+  
+  <!-- Chart.js v4.4.7 via jsDelivr -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* Custom scrollbar & animasi NOC */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.3);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.5);
+    }
+
+    @keyframes emergencyPulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+      }
+      50% {
+        box-shadow: 0 0 24px 4px rgba(239, 68, 68, 0.45);
+      }
+    }
+
+    .emergency-banner-pulse {
+      animation: emergencyPulse 2s infinite ease-in-out;
+    }
+
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200 antialiased selection:bg-blue-500 selection:text-white">
+
+  <!-- Container Notifikasi Toast (Pengganti alert()) -->
+  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+  <!-- A. HEADER NOC -->
+  <header class="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3.5">
+        
+        <!-- Brand & Logo -->
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+              <!-- SVG Server Rack Icon -->
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <rect x="2" y="3" width="20" height="7" rx="2"></rect>
+                <rect x="2" y="14" width="20" height="7" rx="2"></rect>
+                <line x1="6" y1="6.5" x2="6.01" y2="6.5" stroke-width="2.5" stroke-linecap="round"></line>
+                <line x1="6" y1="17.5" x2="6.01" y2="17.5" stroke-width="2.5" stroke-linecap="round"></line>
+                <line x1="10" y1="6.5" x2="18" y2="6.5"></line>
+                <line x1="10" y1="17.5" x2="18" y2="17.5"></line>
+              </svg>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h1 class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">ServerRoom Monitor</h1>
+                <span class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">NOC LIVE</span>
+              </div>
+              <p class="text-xs text-slate-500 dark:text-slate-400">IoT Data Center Environmental Telemetry</p>
+            </div>
+          </div>
+
+          <!-- Tombol Theme Mobile -->
+          <button id="themeToggleMobile" type="button" aria-label="Ubah Tema" class="lg:hidden p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+            <svg class="w-5 h-5 hidden dark:block text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg>
+            <svg class="w-5 h-5 block dark:hidden text-slate-700" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+          </button>
+        </div>
+
+        <!-- Status Badges, Jam WIB & Theme Switcher -->
+        <div class="flex flex-wrap items-center gap-2.5 sm:gap-3 justify-between lg:justify-end">
+          
+          <!-- Status Koneksi MQTT -->
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 text-xs font-medium">
+            <span id="mqttDot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+            <span class="text-slate-500 dark:text-slate-400">MQTT:</span>
+            <span id="mqttStatusText" class="font-semibold text-amber-600 dark:text-amber-400">Connecting</span>
+          </div>
+
+          <!-- Status Perangkat ESP32 -->
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 text-xs font-medium">
+            <span id="espHeaderDot" class="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+            <span class="text-slate-500 dark:text-slate-400">ESP32:</span>
+            <span id="espHeaderStatusText" class="font-semibold text-slate-600 dark:text-slate-300">Offline</span>
+          </div>
+
+          <!-- Jam & Tanggal Lokal WIB -->
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 text-xs">
+            <svg class="w-4 h-4 text-blue-500 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <div class="flex items-center gap-1.5 font-mono tabular-nums">
+              <span id="localDateText" class="text-slate-500 dark:text-slate-400 hidden sm:inline">-- --- ----</span>
+              <span class="text-slate-300 dark:text-slate-600 hidden sm:inline">|</span>
+              <span id="localClockText" class="font-bold text-slate-800 dark:text-slate-100">--:--:--</span>
+              <span class="text-[10px] font-sans font-bold text-blue-600 dark:text-blue-400">WIB</span>
+            </div>
+          </div>
+
+          <!-- Tombol Theme Desktop -->
+          <button id="themeToggleDesktop" type="button" title="Ganti Light / Dark Mode" class="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+            <svg class="w-4 h-4 hidden dark:block text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg>
+            <svg class="w-4 h-4 block dark:hidden text-slate-700" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            <span class="dark:hidden">Dark Mode</span>
+            <span class="hidden dark:inline">Light Mode</span>
+          </button>
+
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- B. EMERGENCY ALERT BANNER (Muncul saat CRITICAL) -->
+    <section id="emergencyBanner" class="hidden rounded-2xl bg-gradient-to-r from-red-600 via-red-600 to-rose-700 text-white p-4 sm:p-5 border-2 border-red-400/60 emergency-banner-pulse transition-all duration-300" role="alert">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-start sm:items-center gap-4">
+          <div class="p-3 rounded-xl bg-white/15 backdrop-blur-sm shrink-0 animate-bounce">
+            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+          </div>
+          <div>
+            <div class="flex flex-wrap items-center gap-2.5">
+              <h2 id="emergencyHeadline" class="text-xl sm:text-2xl font-extrabold tracking-tight font-mono">OVERHEAT! --.-°C</h2>
+              <span id="mutedBadge" class="hidden inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-400 text-slate-950 shadow-sm">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path>
+                </svg>
+                Buzzer Dibisukan
+              </span>
+            </div>
+            <p class="text-sm text-red-100 mt-1">
+              Suhu ruang server melewati batas aman! Alarm dimulai pada pukul <span id="alarmStartTime" class="font-mono font-bold underline">--:--:--</span> WIB.
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 self-start md:self-center bg-black/25 px-3.5 py-2 rounded-xl border border-white/15 text-xs font-mono">
+          <span class="w-2 h-2 rounded-full bg-white animate-ping"></span>
+          <span>STATUS: CRITICAL</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- C. MONITORING CARDS (4 KARTU UTAMA) -->
+    <section aria-label="Kartu Monitoring Utama" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-5">
+      
+      <!-- 1. Temperature Card -->
+      <div id="tempCard" class="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 p-5 shadow-sm transition-all duration-300 relative overflow-hidden">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Temperature</span>
+          <div id="tempIconBox" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 transition-colors">
+            <!-- Thermometer SVG -->
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path>
+            </svg>
+          </div>
+        </div>
+        <div class="flex items-baseline gap-1.5 my-1">
+          <span id="tempValue" class="text-4xl sm:text-5xl font-extrabold font-mono tabular-nums tracking-tight text-slate-800 dark:text-white">--.-</span>
+          <span class="text-xl font-bold text-slate-400 dark:text-slate-500">°C</span>
+        </div>
+        <div class="mt-4 flex items-center justify-between">
+          <span id="tempConditionBadge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+            <span id="tempConditionDot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+            <span id="tempConditionText">Menunggu Data</span>
+          </span>
+          <span class="text-xs text-slate-400 dark:text-slate-500 font-mono">Limit: <strong id="cardLimitDisplay" class="text-slate-600 dark:text-slate-300">--</strong>°C</span>
+        </div>
+      </div>
+
+      <!-- 2. Humidity Card -->
+      <div class="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 p-5 shadow-sm transition-all duration-300">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Humidity</span>
+          <div class="p-2.5 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400">
+            <!-- Droplet SVG -->
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+            </svg>
+          </div>
+        </div>
+        <div class="flex items-baseline gap-1.5 my-1">
+          <span id="humValue" class="text-4xl sm:text-5xl font-extrabold font-mono tabular-nums tracking-tight text-slate-800 dark:text-white">--.-</span>
+          <span class="text-xl font-bold text-slate-400 dark:text-slate-500">%</span>
+        </div>
+        <div class="mt-4 flex items-center justify-between">
+          <span id="humConditionBadge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400">
+            <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+            <span id="humConditionText">Menunggu Data</span>
+          </span>
+          <span class="text-xs text-slate-400 dark:text-slate-500">Ideal: 40–60%</span>
+        </div>
+      </div>
+
+      <!-- 3. Device Status Card -->
+      <div id="deviceCard" class="rounded-2xl bg-slate-100/80 dark:bg-slate-900/70 border-2 border-slate-300 dark:border-slate-800 p-5 shadow-sm transition-all duration-300">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Device Status</span>
+          <div id="deviceIconBox" class="p-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500">
+            <!-- CPU / Chip SVG -->
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+              <rect x="9" y="9" width="6" height="6"></rect>
+              <line x1="9" y1="1" x2="9" y2="4"></line>
+              <line x1="15" y1="1" x2="15" y2="4"></line>
+              <line x1="9" y1="20" x2="9" y2="23"></line>
+              <line x1="15" y1="20" x2="15" y2="23"></line>
+              <line x1="20" y1="9" x2="23" y2="9"></line>
+              <line x1="20" y1="14" x2="23" y2="14"></line>
+              <line x1="1" y1="9" x2="4" y2="9"></line>
+              <line x1="1" y1="14" x2="4" y2="14"></line>
+            </svg>
+          </div>
+        </div>
+        <div class="flex items-center gap-2.5 my-2">
+          <span id="deviceCardDot" class="w-3.5 h-3.5 rounded-full bg-slate-400"></span>
+          <span id="deviceCardStatus" class="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-600 dark:text-slate-400">Offline</span>
+        </div>
+        <div class="mt-4 pt-3 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-between text-xs">
+          <span class="text-slate-500 dark:text-slate-400">Telemetri terakhir:</span>
+          <span id="lastTelemetryTime" class="font-mono font-semibold text-slate-700 dark:text-slate-300">Belum ada</span>
+        </div>
+      </div>
+
+      <!-- 4. Device Clock Card -->
+      <div class="rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800 p-5 shadow-sm transition-all duration-300">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Device Clock</span>
+          <div class="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+            <!-- Clock Sync SVG -->
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+          </div>
+        </div>
+        <div class="flex items-baseline gap-2 my-1.5">
+          <span id="deviceClockValue" class="text-3xl sm:text-4xl font-extrabold font-mono tabular-nums tracking-tight text-slate-800 dark:text-white">--:--:--</span>
+          <span class="text-xs font-bold px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">WIB</span>
+        </div>
+        <div class="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+          <span class="text-slate-500 dark:text-slate-400">Node ID:</span>
+          <span class="font-mono font-semibold text-slate-700 dark:text-slate-300">ESP32_ServerRoom</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- D. REAL-TIME CHARTS & E. TEMPERATURE THRESHOLD CONTROL -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- D. Real-Time Chart (8 kolom di desktop) -->
+      <div class="lg:col-span-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm flex flex-col">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div>
+            <h2 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+              </svg>
+              Grafik Telemetri Suhu & Kelembaban Real-Time
+            </h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Menampilkan hingga 60 sampel telemetri terakhir beserta garis batas alarm aktif</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs font-mono">
+            <span class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+              Sampel: <strong id="chartSampleCount">0</strong>/60
+            </span>
+          </div>
+        </div>
+        
+        <div class="relative w-full h-72 sm:h-80 flex-1">
+          <canvas id="telemetryChart"></canvas>
+        </div>
+      </div>
+
+      <!-- E. Temperature Threshold Control (4 kolom di desktop) -->
+      <div class="lg:col-span-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 shadow-sm flex flex-col justify-between">
+        <div>
+          <div class="flex items-center gap-2.5 mb-1">
+            <div class="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-base font-bold text-slate-900 dark:text-white">Kontrol Batas Suhu</h2>
+              <p class="text-xs text-slate-500 dark:text-slate-400">Konfigurasi Threshold NVS ESP32</p>
+            </div>
+          </div>
+
+          <!-- Status Nilai Aktif & Titik Pemulihan -->
+          <div class="grid grid-cols-2 gap-3 my-5">
+            <div class="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
+              <span class="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Batas Suhu Aktif</span>
+              <div class="mt-1 flex items-baseline gap-1">
+                <span id="activeLimitValue" class="text-2xl font-extrabold font-mono text-amber-600 dark:text-amber-400">--.-</span>
+                <span class="text-xs font-bold text-slate-400">°C</span>
+              </div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
+              <span class="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Titik Pemulihan</span>
+              <div class="mt-1 flex items-baseline gap-1">
+                <span id="clearAtValue" class="text-2xl font-extrabold font-mono text-emerald-600 dark:text-emerald-400">--.-</span>
+                <span class="text-xs font-bold text-slate-400">°C</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Form Input Batas Baru -->
+          <form id="thresholdForm" class="space-y-3.5" novalidate>
+            <div>
+              <label for="thresholdInput" class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                Batas Suhu Baru (10 – 80 °C)
+              </label>
+              <div class="relative">
+                <input
+                  type="number"
+                  id="thresholdInput"
+                  name="thresholdInput"
+                  min="10"
+                  max="80"
+                  step="0.5"
+                  placeholder="Contoh: 35"
+                  class="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono font-bold text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                >
+                <span class="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 pointer-events-none">°C</span>
+              </div>
+              <p id="inputErrorMsg" class="hidden mt-1.5 text-xs font-medium text-red-500"></p>
+            </div>
+
+            <button
+              type="submit"
+              id="sendThresholdBtn"
+              class="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm shadow-sm shadow-blue-600/20 flex items-center justify-center gap-2 transition"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+              <span>Kirim Perubahan</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- Indikator Menunggu Konfirmasi ESP32 -->
+        <div id="pendingConfirmationBox" class="hidden mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-2.5 text-xs text-amber-700 dark:text-amber-300">
+          <svg class="w-4 h-4 animate-spin shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <div>
+            <p class="font-bold">Menunggu konfirmasi perangkat...</p>
+            <p class="text-[11px] opacity-85">Target dikirim: <span id="pendingTargetVal" class="font-mono font-bold">--</span>°C</p>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- F. EVENT ACTIVITY LOG -->
+    <section class="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div class="p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-base font-bold text-slate-900 dark:text-white">Log Aktivitas & Kejadian Sistem</h2>
+            <span id="logCountBadge" class="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">0/50</span>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Riwayat transisi alarm, boot perangkat, pembaruan batas NVS, dan aksi mute fisik</p>
+        </div>
+
+        <button
+          type="button"
+          id="downloadCsvBtn"
+          class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-semibold shadow-sm transition self-start sm:self-auto"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+          </svg>
+          <span>Unduh Log CSV</span>
+        </button>
+      </div>
+
+      <div class="overflow-x-auto max-h-96">
+        <table class="w-full text-left border-collapse">
+          <thead class="bg-slate-50 dark:bg-slate-800/80 sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+            <tr>
+              <th class="py-3 px-4 w-32">Waktu</th>
+              <th class="py-3 px-4 w-36">Jenis Kejadian</th>
+              <th class="py-3 px-4">Deskripsi</th>
+              <th class="py-3 px-4">Detail</th>
+            </tr>
+          </thead>
+          <tbody id="activityLogBody" class="divide-y divide-slate-100 dark:divide-slate-800/80 text-xs sm:text-sm">
+            <tr id="emptyLogRow">
+              <td colspan="4" class="py-8 px-4 text-center text-slate-400 dark:text-slate-500 text-xs">
+                Belum ada kejadian tercatat. Menunggu paket telemetri atau event dari ESP32...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- G. FOOTER -->
+  <footer class="mt-auto border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs text-slate-500 dark:text-slate-400">
+        <div class="space-y-1">
+          <div class="flex flex-wrap items-center gap-2 font-semibold text-slate-700 dark:text-slate-200">
+            <span>ServerRoom Monitor v1.0.0</span>
+            <span>•</span>
+            <span>Perangkat: <code class="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-blue-600 dark:text-blue-400">ESP32_ServerRoom</code></span>
+            <span>•</span>
+            <span>MQTT: <strong id="footerMqttStatus" class="text-amber-500">Connecting</strong></span>
+          </div>
+          <p class="text-[11px] text-slate-400 dark:text-slate-500">
+            Broker: <span class="font-mono">wss://broker.hivemq.com:8884/mqtt</span> | Client ID: <span id="footerClientId" class="font-mono">-</span>
+          </p>
+        </div>
+        <div id="simulationBadge" class="hidden items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-[11px] font-semibold">
+          <span>Mode Simulasi Lokal (WebSocket dibatasi sandbox)</span>
+          <button type="button" id="simMuteBtn" class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 transition font-mono">Simulasi Mute</button>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- LOGIKA UTAMA APLIKASI (VANILLA JAVASCRIPT) -->
+  <script>
+    (() => {
+      'use strict';
+
+      // =========================================================================
+      // 1. KONFIGURASI KONSTANTA & TOPIC MQTT
+      // =========================================================================
+      const CONFIG = {
+        BROKER_URL: 'wss://broker.hivemq.com:8884/mqtt',
+        DEVICE_ID: 'ESP32_ServerRoom',
+        // Samakan PARTICIPANT_ID dengan nilai #define PESERTA di sketch.ino.
+        // Sketch awal memakai pola topic ukk/server_room/<PESERTA>/... .
+        PARTICIPANT_ID: 'nama_peserta',
+        TOPICS: {
+          TELEMETRY: 'serverroom/ESP32_ServerRoom/telemetry',
+          EVENT: 'serverroom/ESP32_ServerRoom/event',
+          COMMAND: 'serverroom/ESP32_ServerRoom/command',
+          LEGACY_TELEMETRY: 'ukk/server_room/+/telemetry',
+          LEGACY_EVENT: 'ukk/server_room/+/event',
+          LEGACY_COMMAND: 'ukk/server_room/nama_peserta/command'
+        },
+        OFFLINE_TIMEOUT_MS: 15000, // 15 detik tanpa telemetri = Offline
+        MAX_CHART_POINTS: 60,      // Maksimal 60 titik data grafik
+        MAX_LOG_ENTRIES: 50,       // Maksimal 50 baris log kejadian
+        RECONNECT_PERIOD_MS: 3000,
+        STORAGE_KEYS: {
+          THEME: 'srm_theme_preference',
+          ACTIVE_LIMIT: 'srm_active_limit',
+          CLEAR_AT: 'srm_clear_at'
+        }
+      };
+
+      // =========================================================================
+      // 2. STATE APLIKASI TERPUSAT
+      // =========================================================================
+      const state = {
+        mqttClient: null,
+        mqttState: 'Disconnected', // Connecting | Connected | Reconnecting | Disconnected
+        clientId: 'srm_noc_' + Math.random().toString(16).substring(2, 10) + '_' + Date.now().toString(36),
+        
+        // Status Perangkat & Telemetri
+        deviceOnline: false,
+        lastTelemetryTimestamp: null, // Epoch ms saat telemetri diterima
+        lastDeviceTimeStr: '--:--:--',
+        currentStatus: null,          // 'NORMAL' | 'CRITICAL' | null
+        alarmStartTime: null,
+        isMuted: false,
+
+        // Konfigurasi Threshold (diperbarui resmi hanya dari event ESP32)
+        activeLimit: null,
+        clearAt: null,
+        pendingTargetLimit: null,
+
+        // Data Grafik & Log
+        chartData: {
+          labels: [],
+          temps: [],
+          hums: [],
+          limits: []
+        },
+        activityLogs: [],
+        chartInstance: null,
+
+        // Timer & Interval
+        offlineWatchdogTimer: null,
+        localClockTimer: null,
+        simulationTimer: null,
+        isSimulationMode: false,
+        simLimit: 35.0,
+        simTemp: 26.5,
+        simStatus: 'NORMAL'
+      };
+
+      // =========================================================================
+      // 3. REFERENSI ELEMEN DOM
+      // =========================================================================
+      const dom = {
+        // Header & Theme
+        themeToggleMobile: document.getElementById('themeToggleMobile'),
+        themeToggleDesktop: document.getElementById('themeToggleDesktop'),
+        mqttDot: document.getElementById('mqttDot'),
+        mqttStatusText: document.getElementById('mqttStatusText'),
+        espHeaderDot: document.getElementById('espHeaderDot'),
+        espHeaderStatusText: document.getElementById('espHeaderStatusText'),
+        localDateText: document.getElementById('localDateText'),
+        localClockText: document.getElementById('localClockText'),
+
+        // Emergency Banner
+        emergencyBanner: document.getElementById('emergencyBanner'),
+        emergencyHeadline: document.getElementById('emergencyHeadline'),
+        mutedBadge: document.getElementById('mutedBadge'),
+        alarmStartTime: document.getElementById('alarmStartTime'),
+
+        // Monitoring Cards
+        tempCard: document.getElementById('tempCard'),
+        tempIconBox: document.getElementById('tempIconBox'),
+        tempValue: document.getElementById('tempValue'),
+        tempConditionBadge: document.getElementById('tempConditionBadge'),
+        tempConditionDot: document.getElementById('tempConditionDot'),
+        tempConditionText: document.getElementById('tempConditionText'),
+        cardLimitDisplay: document.getElementById('cardLimitDisplay'),
+
+        humValue: document.getElementById('humValue'),
+        humConditionBadge: document.getElementById('humConditionBadge'),
+        humConditionText: document.getElementById('humConditionText'),
+
+        deviceCard: document.getElementById('deviceCard'),
+        deviceIconBox: document.getElementById('deviceIconBox'),
+        deviceCardDot: document.getElementById('deviceCardDot'),
+        deviceCardStatus: document.getElementById('deviceCardStatus'),
+        lastTelemetryTime: document.getElementById('lastTelemetryTime'),
+
+        deviceClockValue: document.getElementById('deviceClockValue'),
+
+        // Chart
+        chartSampleCount: document.getElementById('chartSampleCount'),
+        telemetryChartCanvas: document.getElementById('telemetryChart'),
+
+        // Threshold Control
+        activeLimitValue: document.getElementById('activeLimitValue'),
+        clearAtValue: document.getElementById('clearAtValue'),
+        thresholdForm: document.getElementById('thresholdForm'),
+        thresholdInput: document.getElementById('thresholdInput'),
+        inputErrorMsg: document.getElementById('inputErrorMsg'),
+        sendThresholdBtn: document.getElementById('sendThresholdBtn'),
+        pendingConfirmationBox: document.getElementById('pendingConfirmationBox'),
+        pendingTargetVal: document.getElementById('pendingTargetVal'),
+
+        // Activity Log
+        logCountBadge: document.getElementById('logCountBadge'),
+        downloadCsvBtn: document.getElementById('downloadCsvBtn'),
+        activityLogBody: document.getElementById('activityLogBody'),
+
+        // Toast
+        toastContainer: document.getElementById('toastContainer'),
+
+        // Footer
+        footerMqttStatus: document.getElementById('footerMqttStatus'),
+        footerClientId: document.getElementById('footerClientId'),
+        simulationBadge: document.getElementById('simulationBadge'),
+        simMuteBtn: document.getElementById('simMuteBtn')
+      };
+
+      // =========================================================================
+      // 4. UTILITAS WAKTU WIB & NOTIFIKASI TOAST
+      // =========================================================================
+      function getCurrentWibTimeStr() {
+        try {
+          return new Intl.DateTimeFormat('id-ID', {
+            timeZone: 'Asia/Jakarta',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          }).format(new Date()).replace(/\./g, ':');
+        } catch (e) {
+          const d = new Date();
+          return d.toTimeString().slice(0, 8);
+        }
+      }
+
+      function getCurrentWibDateStr() {
+        try {
+          return new Intl.DateTimeFormat('id-ID', {
+            timeZone: 'Asia/Jakarta',
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
+          }).format(new Date());
+        } catch (e) {
+          return new Date().toLocaleDateString('id-ID');
+        }
+      }
+
+      function startLocalClock() {
+        const updateClock = () => {
+          dom.localClockText.textContent = getCurrentWibTimeStr();
+          dom.localDateText.textContent = getCurrentWibDateStr();
+        };
+        updateClock();
+        state.localClockTimer = setInterval(updateClock, 1000);
+      }
+
+      function showToast(message, type = 'info') {
+        const styles = {
+          success: 'bg-emerald-600 text-white border-emerald-400/40',
+          error: 'bg-red-600 text-white border-red-400/40',
+          warning: 'bg-amber-500 text-slate-950 border-amber-300/60',
+          info: 'bg-slate-800 dark:bg-slate-800 text-white border-slate-700'
+        };
+
+        const toast = document.createElement('div');
+        toast.className = `pointer-events-auto flex items-center justify-between gap-3 px-4 py-3 rounded-xl border shadow-lg text-xs sm:text-sm font-medium transition-all duration-300 transform translate-y-2 opacity-0 ${styles[type] || styles.info}`;
+        toast.innerHTML = `
+          <span>${escapeHtml(message)}</span>
+          <button type="button" class="opacity-75 hover:opacity-100 font-bold text-base leading-none">&times;</button>
+        `;
+
+        const closeBtn = toast.querySelector('button');
+        const removeToast = () => {
+          toast.classList.add('opacity-0', 'translate-y-2');
+          setTimeout(() => toast.remove(), 250);
+        };
+        closeBtn.addEventListener('click', removeToast);
+
+        dom.toastContainer.appendChild(toast);
+        requestAnimationFrame(() => {
+          toast.classList.remove('translate-y-2', 'opacity-0');
+        });
+
+        setTimeout(removeToast, 4500);
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      // =========================================================================
+      // 5. TEMA LIGHT / DARK MODE & LOCAL STORAGE
+      // =========================================================================
+      function initTheme() {
+        const savedTheme = localStorage.getItem(CONFIG.STORAGE_KEYS.THEME);
+        if (savedTheme === 'light') {
+          document.documentElement.classList.remove('dark');
+        } else {
+          document.documentElement.classList.add('dark');
+        }
+      }
+
+      function toggleTheme() {
+        const isDark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem(CONFIG.STORAGE_KEYS.THEME, isDark ? 'dark' : 'light');
+        updateChartTheme();
+      }
+
+      function restoreCachedThreshold() {
+        const savedLimit = parseFloat(localStorage.getItem(CONFIG.STORAGE_KEYS.ACTIVE_LIMIT));
+        const savedClear = parseFloat(localStorage.getItem(CONFIG.STORAGE_KEYS.CLEAR_AT));
+        if (Number.isFinite(savedLimit) && savedLimit >= 10 && savedLimit <= 80) {
+          state.activeLimit = savedLimit;
+          state.clearAt = Number.isFinite(savedClear) ? savedClear : Number((savedLimit - 2).toFixed(1));
+          updateThresholdDisplay();
+        }
+      }
+
+      // =========================================================================
+      // 6. PEMBARUAN UI STATUS MQTT & PERANGKAT ESP32
+      // =========================================================================
+      function updateMqttStatusUI(newStatus) {
+        state.mqttState = newStatus;
+        dom.mqttStatusText.textContent = newStatus;
+        dom.footerMqttStatus.textContent = newStatus;
+
+        dom.mqttDot.className = 'w-2.5 h-2.5 rounded-full';
+        dom.mqttStatusText.className = 'font-semibold';
+        dom.footerMqttStatus.className = 'font-semibold';
+
+        if (newStatus === 'Connected') {
+          dom.mqttDot.classList.add('bg-emerald-500');
+          dom.mqttStatusText.classList.add('text-emerald-600', 'dark:text-emerald-400');
+          dom.footerMqttStatus.classList.add('text-emerald-500');
+        } else if (newStatus === 'Connecting' || newStatus === 'Reconnecting') {
+          dom.mqttDot.classList.add('bg-amber-500', 'animate-pulse');
+          dom.mqttStatusText.classList.add('text-amber-600', 'dark:text-amber-400');
+          dom.footerMqttStatus.classList.add('text-amber-500');
+        } else {
+          dom.mqttDot.classList.add('bg-red-500');
+          dom.mqttStatusText.classList.add('text-red-600', 'dark:text-red-400');
+          dom.footerMqttStatus.classList.add('text-red-500');
+        }
+      }
+
+      function setDeviceOnlineState(isOnline) {
+        if (state.deviceOnline === isOnline && state.lastTelemetryTimestamp !== null) return;
+        state.deviceOnline = isOnline;
+
+        if (isOnline) {
+          // Header badge
+          dom.espHeaderDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
+          dom.espHeaderStatusText.textContent = 'Online';
+          dom.espHeaderStatusText.className = 'font-semibold text-emerald-600 dark:text-emerald-400';
+
+          // Device Card
+          dom.deviceCard.className = 'rounded-2xl bg-white dark:bg-slate-900 border-2 border-emerald-500/40 dark:border-emerald-500/30 p-5 shadow-sm transition-all duration-300';
+          dom.deviceIconBox.className = 'p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
+          dom.deviceCardDot.className = 'w-3.5 h-3.5 rounded-full bg-emerald-500 animate-pulse';
+          dom.deviceCardStatus.textContent = 'Online';
+          dom.deviceCardStatus.className = 'text-2xl sm:text-3xl font-extrabold tracking-tight text-emerald-600 dark:text-emerald-400';
+        } else {
+          // Header badge
+          dom.espHeaderDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-400';
+          dom.espHeaderStatusText.textContent = 'Offline';
+          dom.espHeaderStatusText.className = 'font-semibold text-slate-500 dark:text-slate-400';
+
+          // Device Card berubah abu-abu saat Offline
+          dom.deviceCard.className = 'rounded-2xl bg-slate-100/90 dark:bg-slate-900/60 border-2 border-slate-300 dark:border-slate-800 p-5 shadow-sm transition-all duration-300 opacity-90';
+          dom.deviceIconBox.className = 'p-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500';
+          dom.deviceCardDot.className = 'w-3.5 h-3.5 rounded-full bg-slate-400';
+          dom.deviceCardStatus.textContent = 'Offline';
+          dom.deviceCardStatus.className = 'text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-500 dark:text-slate-400';
+        }
+      }
+
+      function startOfflineWatchdog() {
+        state.offlineWatchdogTimer = setInterval(() => {
+          if (state.lastTelemetryTimestamp === null) return;
+          const elapsed = Date.now() - state.lastTelemetryTimestamp;
+          if (elapsed > CONFIG.OFFLINE_TIMEOUT_MS && state.deviceOnline) {
+            setDeviceOnlineState(false);
+            showToast('Perangkat ESP32_ServerRoom Offline (tidak ada telemetri > 15 detik).', 'warning');
+          }
+        }, 1000);
+      }
+
+      // =========================================================================
+      // 7. LOGIKA MONITORING ALARM, KARTU & BANNER DARURAT
+      // =========================================================================
+      function updateMonitoringCardsAndBanner(temp, hum, status, deviceTime) {
+        // Update angka suhu & kelembaban
+        dom.tempValue.textContent = temp.toFixed(1);
+        dom.humValue.textContent = hum.toFixed(1);
+        dom.deviceClockValue.textContent = deviceTime;
+        dom.lastTelemetryTime.textContent = `${deviceTime} WIB`;
+
+        // Indikator kelembaban
+        if (hum < 30) {
+          dom.humConditionText.textContent = 'Terlalu Kering';
+          dom.humConditionBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400';
+        } else if (hum > 70) {
+          dom.humConditionText.textContent = 'Kelembaban Tinggi';
+          dom.humConditionBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400';
+        } else {
+          dom.humConditionText.textContent = 'Normal';
+          dom.humConditionBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400';
+        }
+
+        // Status resmi dari ESP32: NORMAL vs CRITICAL
+        if (status === 'CRITICAL') {
+          // Kartu suhu berubah merah
+          dom.tempCard.className = 'rounded-2xl bg-red-50/70 dark:bg-red-950/30 border-2 border-red-500 p-5 shadow-md shadow-red-500/10 transition-all duration-300 relative overflow-hidden';
+          dom.tempIconBox.className = 'p-2.5 rounded-xl bg-red-500/15 text-red-600 dark:text-red-400';
+          dom.tempValue.className = 'text-4xl sm:text-5xl font-extrabold font-mono tabular-nums tracking-tight text-red-600 dark:text-red-400';
+          dom.tempConditionBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-red-500/15 text-red-700 dark:text-red-300';
+          dom.tempConditionDot.className = 'w-2 h-2 rounded-full bg-red-500 animate-ping';
+          dom.tempConditionText.textContent = 'CRITICAL — OVERHEAT';
+
+          // Tampilkan banner darurat
+          dom.emergencyBanner.classList.remove('hidden');
+          dom.emergencyHeadline.textContent = `OVERHEAT! ${temp.toFixed(1)}°C`;
+          if (!state.alarmStartTime) {
+            state.alarmStartTime = deviceTime;
+          }
+          dom.alarmStartTime.textContent = state.alarmStartTime;
+
+          // Tampilkan atau sembunyikan label Buzzer Dibisukan
+          if (state.isMuted) {
+            dom.mutedBadge.classList.remove('hidden');
+          } else {
+            dom.mutedBadge.classList.add('hidden');
+          }
+        } else {
+          // Status NORMAL -> Kartu suhu berwarna hijau
+          dom.tempCard.className = 'rounded-2xl bg-white dark:bg-slate-900 border-2 border-emerald-500/50 dark:border-emerald-500/40 p-5 shadow-sm transition-all duration-300 relative overflow-hidden';
+          dom.tempIconBox.className = 'p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
+          dom.tempValue.className = 'text-4xl sm:text-5xl font-extrabold font-mono tabular-nums tracking-tight text-emerald-600 dark:text-emerald-400';
+          dom.tempConditionBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
+          dom.tempConditionDot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+          dom.tempConditionText.textContent = 'NORMAL';
+
+          // Hilangkan banner darurat & reset status mute
+          dom.emergencyBanner.classList.add('hidden');
+          dom.mutedBadge.classList.add('hidden');
+          state.alarmStartTime = null;
+          state.isMuted = false;
+        }
+      }
+
+      function updateThresholdDisplay() {
+        if (state.activeLimit !== null) {
+          const limitFormatted = Number(state.activeLimit).toFixed(1);
+          dom.activeLimitValue.textContent = limitFormatted;
+          dom.cardLimitDisplay.textContent = limitFormatted;
+        }
+        if (state.clearAt !== null) {
+          dom.clearAtValue.textContent = Number(state.clearAt).toFixed(1);
+        }
+      }
+
+      // =========================================================================
+      // 8. GRAFIK REAL-TIME (CHART.JS v4.4.7)
+      // =========================================================================
+      function initChart() {
+        const ctx = dom.telemetryChartCanvas.getContext('2d');
+        const isDark = document.documentElement.classList.contains('dark');
+        const gridColor = isDark ? 'rgba(148, 163, 184, 0.12)' : 'rgba(15, 23, 42, 0.08)';
+        const textColor = isDark ? '#94a3b8' : '#475569';
+
+        state.chartInstance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: state.chartData.labels,
+            datasets: [
+              {
+                label: 'Suhu (°C)',
+                data: state.chartData.temps,
+                borderColor: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                borderWidth: 2.5,
+                pointRadius: 2.5,
+                pointHoverRadius: 5,
+                tension: 0.3,
+                fill: true,
+                yAxisID: 'yTemp'
+              },
+              {
+                label: 'Batas Suhu Aktif (°C)',
+                data: state.chartData.limits,
+                borderColor: '#f59e0b',
+                borderWidth: 2,
+                borderDash: [6, 6],
+                pointRadius: 0,
+                pointHoverRadius: 0,
+                tension: 0,
+                fill: false,
+                yAxisID: 'yTemp'
+              },
+              {
+                label: 'Kelembaban (%)',
+                data: state.chartData.hums,
+                borderColor: '#0ea5e9',
+                backgroundColor: 'rgba(14, 165, 233, 0.08)',
+                borderWidth: 2,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+                tension: 0.3,
+                fill: false,
+                yAxisID: 'yHum'
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+              duration: 250
+            },
+            interaction: {
+              mode: 'index',
+              intersect: false
+            },
+            plugins: {
+              legend: {
+                position: 'top',
+                labels: {
+                  color: textColor,
+                  usePointStyle: true,
+                  boxWidth: 8,
+                  font: {
+                    family: 'Inter, sans-serif',
+                    size: 12,
+                    weight: '600'
+                  }
+                }
+              },
+              tooltip: {
+                backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                titleColor: isDark ? '#f8fafc' : '#0f172a',
+                bodyColor: isDark ? '#cbd5e1' : '#334155',
+                borderColor: isDark ? '#334155' : '#cbd5e1',
+                borderWidth: 1,
+                padding: 10,
+                callbacks: {
+                  title: (items) => `Waktu Perangkat: ${items[0].label} WIB`,
+                  label: (ctx) => {
+                    const val = ctx.parsed.y;
+                    if (val === null || val === undefined) return null;
+                    const unit = ctx.dataset.yAxisID === 'yHum' ? '%' : '°C';
+                    return ` ${ctx.dataset.label}: ${val.toFixed(1)}${unit}`;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                grid: { color: gridColor },
+                ticks: {
+                  color: textColor,
+                  maxRotation: 0,
+                  autoSkip: true,
+                  maxTicksLimit: 8,
+                  font: { family: 'JetBrains Mono, monospace', size: 11 }
+                }
+              },
+              yTemp: {
+                type: 'linear',
+                position: 'left',
+                title: {
+                  display: true,
+                  text: 'Suhu (°C)',
+                  color: '#ef4444',
+                  font: { size: 11, weight: 'bold' }
+                },
+                grid: { color: gridColor },
+                ticks: {
+                  color: textColor,
+                  font: { family: 'JetBrains Mono, monospace', size: 11 }
+                }
+              },
+              yHum: {
+                type: 'linear',
+                position: 'right',
+                min: 0,
+                max: 100,
+                title: {
+                  display: true,
+                  text: 'Kelembaban (%)',
+                  color: '#0ea5e9',
+                  font: { size: 11, weight: 'bold' }
+                },
+                grid: { drawOnChartArea: false },
+                ticks: {
+                  color: textColor,
+                  font: { family: 'JetBrains Mono, monospace', size: 11 }
+                }
+              }
+            }
+          }
+        });
+      }
+
+      function updateChartTheme() {
+        if (!state.chartInstance) return;
+        const isDark = document.documentElement.classList.contains('dark');
+        const gridColor = isDark ? 'rgba(148, 163, 184, 0.12)' : 'rgba(15, 23, 42, 0.08)';
+        const textColor = isDark ? '#94a3b8' : '#475569';
+
+        state.chartInstance.options.plugins.legend.labels.color = textColor;
+        state.chartInstance.options.plugins.tooltip.backgroundColor = isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+        state.chartInstance.options.plugins.tooltip.titleColor = isDark ? '#f8fafc' : '#0f172a';
+        state.chartInstance.options.plugins.tooltip.bodyColor = isDark ? '#cbd5e1' : '#334155';
+        state.chartInstance.options.scales.x.grid.color = gridColor;
+        state.chartInstance.options.scales.x.ticks.color = textColor;
+        state.chartInstance.options.scales.yTemp.grid.color = gridColor;
+        state.chartInstance.options.scales.yTemp.ticks.color = textColor;
+        state.chartInstance.options.scales.yHum.ticks.color = textColor;
+        state.chartInstance.update('none');
+      }
+
+      function pushTelemetryToChart(timeLabel, temp, hum) {
+        state.chartData.labels.push(timeLabel);
+        state.chartData.temps.push(temp);
+        state.chartData.hums.push(hum);
+        state.chartData.limits.push(state.activeLimit !== null ? state.activeLimit : null);
+
+        if (state.chartData.labels.length > CONFIG.MAX_CHART_POINTS) {
+          state.chartData.labels.shift();
+          state.chartData.temps.shift();
+          state.chartData.hums.shift();
+          state.chartData.limits.shift();
+        }
+
+        dom.chartSampleCount.textContent = state.chartData.labels.length;
+
+        if (state.chartInstance) {
+          state.chartInstance.update();
+        }
+      }
+
+      function syncChartLimitLine() {
+        if (!state.chartInstance || state.activeLimit === null) return;
+        state.chartData.limits = state.chartData.labels.map(() => state.activeLimit);
+        state.chartInstance.data.datasets[1].data = state.chartData.limits;
+        state.chartInstance.update('none');
+      }
+
+      // =========================================================================
+      // 9. EVENT ACTIVITY LOG & EKSPOR CSV
+      // =========================================================================
+      function addActivityLog(time, type, description, detail) {
+        const entry = {
+          time: time || getCurrentWibTimeStr(),
+          type: String(type).toUpperCase(),
+          description: description || '-',
+          detail: detail || '-'
+        };
+
+        // Kejadian terbaru di paling atas, maksimal 50 kejadian
+        state.activityLogs.unshift(entry);
+        if (state.activityLogs.length > CONFIG.MAX_LOG_ENTRIES) {
+          state.activityLogs.pop();
+        }
+
+        renderActivityLogTable();
+      }
+
+      function getEventBadgeHtml(type) {
+        const badges = {
+          BOOT: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
+          NORMAL: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+          CRITICAL: 'bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30',
+          LIMIT_CHANGED: 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30',
+          LIMIT_REJECTED: 'bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30',
+          MUTED: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+        };
+        const cls = badges[type] || 'bg-slate-500/15 text-slate-600 dark:text-slate-300 border-slate-500/30';
+        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-mono font-bold border ${cls}">${escapeHtml(type)}</span>`;
+      }
+
+      function renderActivityLogTable() {
+        dom.logCountBadge.textContent = `${state.activityLogs.length}/${CONFIG.MAX_LOG_ENTRIES}`;
+
+        if (state.activityLogs.length === 0) {
+          dom.activityLogBody.innerHTML = `
+            <tr>
+              <td colspan="4" class="py-8 px-4 text-center text-slate-400 dark:text-slate-500 text-xs">
+                Belum ada kejadian tercatat. Menunggu paket telemetri atau event dari ESP32...
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        dom.activityLogBody.innerHTML = state.activityLogs.map((log) => `
+          <tr class="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+            <td class="py-3 px-4 font-mono text-xs font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">${escapeHtml(log.time)} WIB</td>
+            <td class="py-3 px-4 whitespace-nowrap">${getEventBadgeHtml(log.type)}</td>
+            <td class="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">${escapeHtml(log.description)}</td>
+            <td class="py-3 px-4 text-xs text-slate-500 dark:text-slate-400 font-mono">${escapeHtml(log.detail)}</td>
+          </tr>
+        `).join('');
+      }
+
+      function exportLogsToCsv() {
+        if (state.activityLogs.length === 0) {
+          showToast('Belum ada data log kejadian untuk diunduh.', 'warning');
+          return;
+        }
+
+        const headers = ['Waktu', 'Jenis Kejadian', 'Deskripsi', 'Detail'];
+        const csvRows = [headers.join(',')];
+
+        state.activityLogs.forEach((log) => {
+          const row = [
+            `"${String(log.time).replace(/"/g, '""')}"`,
+            `"${String(log.type).replace(/"/g, '""')}"`,
+            `"${String(log.description).replace(/"/g, '""')}"`,
+            `"${String(log.detail).replace(/"/g, '""')}"`
+          ];
+          csvRows.push(row.join(','));
+        });
+
+        // Tambahkan UTF-8 BOM agar karakter °C terbuka sempurna di Microsoft Excel
+        const bom = '\uFEFF';
+        const csvContent = bom + csvRows.join('\r\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+
+        const link = document.createElement('a');
+        const dateStamp = new Date().toISOString().slice(0, 10);
+        link.href = url;
+        link.download = `ServerRoom_Log_${dateStamp}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        showToast('File CSV log kejadian berhasil diunduh.', 'success');
+      }
+
+      // =========================================================================
+      // 10. VALIDASI & PEMROSESAN PESAN TELEMETRY
+      // =========================================================================
+      function handleTelemetryMessage(rawPayload) {
+        let data;
+        try {
+          data = JSON.parse(rawPayload);
+        } catch (err) {
+          console.warn('[Telemetry] Gagal parsing JSON:', err);
+          return;
+        }
+
+        // Validasi identitas perangkat dan tipe data
+        if (!data || typeof data !== 'object') return;
+        if (data.device !== CONFIG.DEVICE_ID) {
+          console.warn('[Telemetry] Pesan diabaikan, device ID tidak cocok:', data.device,
+            '| dashboard mengharapkan:', CONFIG.DEVICE_ID);
+          return;
+        }
+
+        const temp = Number(data.temp);
+        const hum = Number(data.hum);
+        const status = String(data.status || '').toUpperCase();
+        const deviceTime = typeof data.time === 'string' && data.time.trim() !== ''
+          ? data.time.trim()
+          : getCurrentWibTimeStr();
+
+        if (!Number.isFinite(temp) || !Number.isFinite(hum)) return;
+        if (status !== 'NORMAL' && status !== 'CRITICAL') return;
+
+        // Perbarui heartbeat online
+        state.lastTelemetryTimestamp = Date.now();
+        state.lastDeviceTimeStr = deviceTime;
+        setDeviceOnlineState(true);
+
+        // Catat perubahan transisi status NORMAL <-> CRITICAL (hindari duplikat jika status sama)
+        if (state.currentStatus !== status) {
+          const prevStatus = state.currentStatus;
+          state.currentStatus = status;
+
+          if (status === 'CRITICAL') {
+            state.alarmStartTime = deviceTime;
+            state.isMuted = false;
+            addActivityLog(
+              deviceTime,
+              'CRITICAL',
+              'Suhu ruang server melewati batas aman (OVERHEAT)',
+              `Suhu: ${temp.toFixed(1)}°C | Kelembaban: ${hum.toFixed(1)}%`
+            );
+          } else if (status === 'NORMAL') {
+            addActivityLog(
+              deviceTime,
+              'NORMAL',
+              prevStatus === 'CRITICAL'
+                ? 'Suhu ruang server telah pulih ke kondisi NORMAL'
+                : 'Sistem beroperasi dalam kondisi suhu NORMAL',
+              `Suhu: ${temp.toFixed(1)}°C | Kelembaban: ${hum.toFixed(1)}%`
+            );
+          }
+        }
+
+        // Perbarui UI kartu, banner darurat, dan grafik
+        updateMonitoringCardsAndBanner(temp, hum, status, deviceTime);
+        pushTelemetryToChart(deviceTime, temp, hum);
+      }
+
+      // =========================================================================
+      // 11. VALIDASI & PEMROSESAN PESAN EVENT
+      // =========================================================================
+      function handleEventMessage(rawPayload) {
+        let data;
+        try {
+          data = JSON.parse(rawPayload);
+        } catch (err) {
+          console.warn('[Event] Gagal parsing JSON:', err);
+          return;
+        }
+
+        if (!data || typeof data !== 'object') return;
+        if (data.device !== CONFIG.DEVICE_ID) return;
+
+        const eventType = String(data.event || '').toUpperCase();
+        const eventTime = typeof data.time === 'string' && data.time.trim() !== ''
+          ? data.time.trim()
+          : (state.lastDeviceTimeStr !== '--:--:--' ? state.lastDeviceTimeStr : getCurrentWibTimeStr());
+
+        const limitVal = data.limit !== undefined ? Number(data.limit) : null;
+        const clearAtVal = data.clear_at !== undefined ? Number(data.clear_at) : null;
+
+        // Heartbeat aktif saat menerima event dari ESP32
+        state.lastTelemetryTimestamp = Date.now();
+        setDeviceOnlineState(true);
+
+        switch (eventType) {
+          case 'BOOT': {
+            if (Number.isFinite(limitVal)) {
+              state.activeLimit = limitVal;
+              state.clearAt = Number.isFinite(clearAtVal) ? clearAtVal : Number((limitVal - 2).toFixed(1));
+              localStorage.setItem(CONFIG.STORAGE_KEYS.ACTIVE_LIMIT, String(state.activeLimit));
+              localStorage.setItem(CONFIG.STORAGE_KEYS.CLEAR_AT, String(state.clearAt));
+              updateThresholdDisplay();
+              syncChartLimitLine();
+            }
+            const limitInfo = Number.isFinite(limitVal)
+              ? `Batas NVS dimuat: ${limitVal.toFixed(1)}°C (Pemulihan: ${state.clearAt.toFixed(1)}°C)`
+              : 'Perangkat ESP32 baru menyala / reset';
+            addActivityLog(eventTime, 'BOOT', 'Perangkat ESP32 menyala dan terhubung ke broker', limitInfo);
+            showToast('Perangkat ESP32_ServerRoom baru saja BOOT.', 'info');
+            break;
+          }
+
+          case 'LIMIT_CHANGED': {
+            if (Number.isFinite(limitVal)) {
+              state.activeLimit = limitVal;
+              state.clearAt = Number.isFinite(clearAtVal) ? clearAtVal : Number((limitVal - 2).toFixed(1));
+              localStorage.setItem(CONFIG.STORAGE_KEYS.ACTIVE_LIMIT, String(state.activeLimit));
+              localStorage.setItem(CONFIG.STORAGE_KEYS.CLEAR_AT, String(state.clearAt));
+              updateThresholdDisplay();
+              syncChartLimitLine();
+            }
+
+            state.pendingTargetLimit = null;
+            dom.pendingConfirmationBox.classList.add('hidden');
+            dom.thresholdInput.value = '';
+
+            const detailStr = Number.isFinite(limitVal)
+              ? `Batas Aktif: ${limitVal.toFixed(1)}°C | Titik Pemulihan: ${state.clearAt.toFixed(1)}°C`
+              : 'Batas suhu diperbarui di NVS';
+
+            addActivityLog(eventTime, 'LIMIT_CHANGED', 'Batas suhu baru berhasil diterapkan dan disimpan di NVS ESP32', detailStr);
+            showToast('Batas baru berhasil diterapkan dan tersimpan di ESP32.', 'success');
+            break;
+          }
+
+          case 'LIMIT_REJECTED': {
+            state.pendingTargetLimit = null;
+            dom.pendingConfirmationBox.classList.add('hidden');
+
+            const reason = typeof data.reason === 'string' && data.reason.trim() !== ''
+              ? data.reason.trim()
+              : 'Nilai batas di luar rentang yang diizinkan oleh perangkat';
+
+            addActivityLog(eventTime, 'LIMIT_REJECTED', 'Perangkat menolak perubahan batas suhu', `Alasan: ${reason}`);
+            showToast(`Perubahan batas ditolak ESP32: ${reason}`, 'error');
+            break;
+          }
+
+          case 'MUTED': {
+            state.isMuted = true;
+            if (state.currentStatus === 'CRITICAL') {
+              dom.mutedBadge.classList.remove('hidden');
+            }
+            addActivityLog(
+              eventTime,
+              'MUTED',
+              'Buzzer alarm dibisukan melalui tombol fisik pada perangkat',
+              'Status alarm CRITICAL tetap aktif hingga suhu turun ke titik pemulihan'
+            );
+            showToast('Buzzer dibisukan melalui tombol fisik ESP32.', 'warning');
+            break;
+          }
+
+          default:
+            // Abaikan event tidak dikenal
+            break;
+        }
+      }
+
+      // =========================================================================
+      // 12. KONEKSI & MANAJEMEN MQTT.JS (v5.10.4) + FALLBACK SIMULASI SANDBOX
+      // =========================================================================
+      function startSandboxSimulation() {
+        if (state.isSimulationMode) return;
+        state.isSimulationMode = true;
+        updateMqttStatusUI('Connected');
+        if (dom.simulationBadge) {
+          dom.simulationBadge.classList.remove('hidden');
+          dom.simulationBadge.classList.add('flex');
+        }
+
+        const simTime = getCurrentWibTimeStr();
+        handleEventMessage(JSON.stringify({
+          device: CONFIG.DEVICE_ID,
+          event: 'BOOT',
+          time: simTime,
+          limit: state.simLimit,
+          clear_at: Number((state.simLimit - 2).toFixed(1))
+        }));
+
+        const emitSimTelemetry = () => {
+          const nowStr = getCurrentWibTimeStr();
+          // Simulasi fluktuasi suhu realistis
+          const delta = (Math.random() - 0.45) * 1.4;
+          state.simTemp = Number(Math.max(22, Math.min(42, state.simTemp + delta)).toFixed(1));
+          const simHum = Number((52 + (Math.random() - 0.5) * 6).toFixed(1));
+
+          if (state.simTemp >= state.simLimit) {
+            state.simStatus = 'CRITICAL';
+          } else if (state.simTemp <= state.simLimit - 2) {
+            state.simStatus = 'NORMAL';
+          }
+
+          handleTelemetryMessage(JSON.stringify({
+            device: CONFIG.DEVICE_ID,
+            time: nowStr,
+            temp: state.simTemp,
+            hum: simHum,
+            status: state.simStatus
+          }));
+        };
+
+        emitSimTelemetry();
+        state.simulationTimer = setInterval(emitSimTelemetry, 5000);
+      }
+
+      function connectMqttBroker() {
+        // Cegah koneksi ganda jika client sebelumnya masih aktif
+        if (state.mqttClient && (state.mqttClient.connected || state.mqttClient.reconnecting)) {
+          return;
+        }
+
+        dom.footerClientId.textContent = state.clientId;
+        updateMqttStatusUI('Connecting');
+
+        try {
+          state.mqttClient = mqtt.connect(CONFIG.BROKER_URL, {
+            clientId: state.clientId,
+            clean: true,
+            connectTimeout: 10000,
+            reconnectPeriod: CONFIG.RECONNECT_PERIOD_MS,
+            keepalive: 30
+          });
+
+          state.mqttClient.on('connect', () => {
+            updateMqttStatusUI('Connected');
+
+            // Subscribe hanya ke topic telemetry dan event (TIDAK subscribe ke command)
+            const subscribeTopics = [
+              CONFIG.TOPICS.TELEMETRY,
+              CONFIG.TOPICS.EVENT,
+              // Kompatibilitas dengan topic pada sketch awal: ukk/server_room/<PESERTA>/...
+              CONFIG.TOPICS.LEGACY_TELEMETRY,
+              CONFIG.TOPICS.LEGACY_EVENT
+            ];
+            state.mqttClient.subscribe(subscribeTopics, { qos: 0 }, (err, granted) => {
+              if (err) {
+                console.warn('[MQTT] Gagal subscribe:', err);
+                showToast('Gagal subscribe ke topic monitoring MQTT.', 'error');
+                return;
+              }
+              console.info('[MQTT] Subscribe berhasil:', granted || subscribeTopics);
+            });
+          });
+
+          state.mqttClient.on('reconnect', () => {
+            updateMqttStatusUI('Reconnecting');
+          });
+
+          state.mqttClient.on('close', () => {
+            if (state.mqttState === 'Connected') {
+              showToast('Koneksi ke broker MQTT terputus. Mencoba menghubungkan ulang...', 'warning');
+            }
+            updateMqttStatusUI('Disconnected');
+          });
+
+          state.mqttClient.on('offline', () => {
+            updateMqttStatusUI('Disconnected');
+          });
+
+          state.mqttClient.on('error', (err) => {
+            const msg = String(err && err.message ? err.message : err);
+            if (msg.includes('not allowed in Canvas') || msg.includes('SecurityError')) {
+              if (state.mqttClient) {
+                try { state.mqttClient.end(true); } catch (_) {}
+                state.mqttClient = null;
+              }
+              startSandboxSimulation();
+              return;
+            }
+            console.warn('[MQTT] Error:', err);
+          });
+
+          state.mqttClient.on('message', (topic, messageBuffer) => {
+            const payloadStr = messageBuffer.toString();
+            // Terima topic versi dashboard baru dan topic legacy dari sketch awal.
+            if (topic === CONFIG.TOPICS.TELEMETRY || topic.endsWith('/telemetry')) {
+              handleTelemetryMessage(payloadStr);
+            } else if (topic === CONFIG.TOPICS.EVENT || topic.endsWith('/event')) {
+              handleEventMessage(payloadStr);
+            }
+          });
+        } catch (err) {
+          const msg = String(err && err.message ? err.message : err);
+          if (msg.includes('not allowed in Canvas') || msg.includes('SecurityError')) {
+            startSandboxSimulation();
+            return;
+          }
+          console.warn('[MQTT] Inisialisasi gagal:', err);
+          updateMqttStatusUI('Disconnected');
+          showToast('Gagal menginisialisasi koneksi MQTT WebSocket.', 'error');
+        }
+      }
+
+      // =========================================================================
+      // 13. PENGIRIMAN COMMAND BATAS SUHU
+      // =========================================================================
+      function handleThresholdSubmit(e) {
+        e.preventDefault();
+        dom.inputErrorMsg.classList.add('hidden');
+
+        const rawVal = dom.thresholdInput.value.trim();
+
+        // Validasi input kosong, bukan angka, atau di luar rentang 10 - 80 °C
+        if (rawVal === '') {
+          dom.inputErrorMsg.textContent = 'Input batas suhu tidak boleh kosong.';
+          dom.inputErrorMsg.classList.remove('hidden');
+          return;
+        }
+
+        const numVal = Number(rawVal);
+        if (!Number.isFinite(numVal) || isNaN(numVal)) {
+          dom.inputErrorMsg.textContent = 'Masukkan nilai angka yang valid.';
+          dom.inputErrorMsg.classList.remove('hidden');
+          return;
+        }
+
+        if (numVal < 10 || numVal > 80) {
+          dom.inputErrorMsg.textContent = 'Batas suhu harus berada di antara 10 hingga 80 °C.';
+          dom.inputErrorMsg.classList.remove('hidden');
+          return;
+        }
+
+        // Kirim angka polos dalam format string (bukan JSON) dengan QoS 1
+        const payloadString = String(numVal);
+
+        // Jika berjalan dalam mode simulasi sandbox Canvas
+        if (state.isSimulationMode) {
+          state.pendingTargetLimit = numVal;
+          dom.pendingTargetVal.textContent = payloadString;
+          dom.pendingConfirmationBox.classList.remove('hidden');
+          showToast(`Perintah terkirim (${payloadString}°C). Menunggu konfirmasi ESP32...`, 'info');
+
+          setTimeout(() => {
+            state.simLimit = numVal;
+            handleEventMessage(JSON.stringify({
+              device: CONFIG.DEVICE_ID,
+              event: 'LIMIT_CHANGED',
+              time: getCurrentWibTimeStr(),
+              limit: numVal,
+              clear_at: Number((numVal - 2).toFixed(1))
+            }));
+          }, 900);
+          return;
+        }
+
+        // Pastikan MQTT dalam status Connected sebelum mengirim command
+        if (!state.mqttClient || state.mqttState !== 'Connected') {
+          showToast('Tidak dapat mengirim perintah: MQTT belum terhubung.', 'error');
+          return;
+        }
+
+        const commandTopic = CONFIG.TOPICS.LEGACY_COMMAND.replace('nama_peserta', CONFIG.PARTICIPANT_ID);
+        console.info('[MQTT] Mengirim batas suhu ke topic:', commandTopic);
+        state.mqttClient.publish(
+          commandTopic,
+          payloadString,
+          { qos: 1, retain: false },
+          (err) => {
+            if (err) {
+              console.warn('[MQTT] Gagal publish command:', err);
+              showToast('Gagal mengirim perintah ke broker MQTT.', 'error');
+              return;
+            }
+
+            // Tampilkan notifikasi perintah terkirim & status menunggu konfirmasi ESP32
+            state.pendingTargetLimit = numVal;
+            dom.pendingTargetVal.textContent = payloadString;
+            dom.pendingConfirmationBox.classList.remove('hidden');
+            showToast(`Perintah terkirim (${payloadString}°C). Menunggu konfirmasi ESP32...`, 'info');
+          }
+        );
+      }
+
+      // =========================================================================
+      // 14. EVENT LISTENERS & CLEANUP SAAT HALAMAN DITUTUP
+      // =========================================================================
+      function bindEvents() {
+        dom.themeToggleMobile.addEventListener('click', toggleTheme);
+        dom.themeToggleDesktop.addEventListener('click', toggleTheme);
+        dom.thresholdForm.addEventListener('submit', handleThresholdSubmit);
+        dom.downloadCsvBtn.addEventListener('click', exportLogsToCsv);
+
+        if (dom.simMuteBtn) {
+          dom.simMuteBtn.addEventListener('click', () => {
+            if (state.isSimulationMode) {
+              handleEventMessage(JSON.stringify({
+                device: CONFIG.DEVICE_ID,
+                event: 'MUTED',
+                time: getCurrentWibTimeStr(),
+                limit: state.simLimit,
+                clear_at: Number((state.simLimit - 2).toFixed(1))
+              }));
+            }
+          });
+        }
+
+        dom.thresholdInput.addEventListener('input', () => {
+          dom.inputErrorMsg.classList.add('hidden');
+        });
+
+        window.addEventListener('beforeunload', () => {
+          if (state.offlineWatchdogTimer) clearInterval(state.offlineWatchdogTimer);
+          if (state.localClockTimer) clearInterval(state.localClockTimer);
+          if (state.simulationTimer) clearInterval(state.simulationTimer);
+          if (state.mqttClient) {
+            try {
+              state.mqttClient.end(true);
+            } catch (e) {
+              // Abaikan error saat unload
+            }
+          }
+        });
+      }
+
+      // =========================================================================
+      // 15. BOOTSTRAP APLIKASI
+      // =========================================================================
+      function initApp() {
+        initTheme();
+        restoreCachedThreshold();
+        startLocalClock();
+        initChart();
+        bindEvents();
+        startOfflineWatchdog();
+        connectMqttBroker();
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initApp);
+      } else {
+        initApp();
+      }
+    })();
+  </script>
+</body>
+</html>
